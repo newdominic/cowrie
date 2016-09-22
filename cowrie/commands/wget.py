@@ -2,25 +2,32 @@
 # See the COPYRIGHT file for more information
 
 import time
-import urlparse
 import re
-import exceptions
 import os
 import getopt
 import hashlib
+try:
+    from urllib.parse import urlparse
+except ImportError:
+    from urlparse import urlparse
+
+from OpenSSL import SSL
 
 from twisted.web import client
 from twisted.internet import reactor, ssl
 from twisted.python import log
 
-from OpenSSL import SSL
-
 from cowrie.core.honeypot import HoneyPotCommand
 from cowrie.core.fs import *
+
+"""
+"""
 
 commands = {}
 
 def tdiff(seconds):
+    """
+    """
     t = seconds
     days = int(t / (24 * 60 * 60))
     t -= (days * 24 * 60 * 60)
@@ -29,25 +36,39 @@ def tdiff(seconds):
     minutes = int(t / 60)
     t -= (minutes * 60)
 
-    s = '%ds' % int(t)
+    s = '%ds' % (int(t),)
     if minutes >= 1: s = '%dm %s' % (minutes, s)
     if hours >= 1: s = '%dh %s' % (hours, s)
     if days >= 1: s = '%dd %s' % (days, s)
     return s
 
+
+
 def sizeof_fmt(num):
+    """
+    """
     for x in ['bytes','K','M','G','T']:
         if num < 1024.0:
             return "%d%s" % (num, x)
         num /= 1024.0
 
+
+
 # Luciano Ramalho @ http://code.activestate.com/recipes/498181/
 def splitthousands( s, sep=','):
+    """
+    """
     if len(s) <= 3: return s
     return splitthousands(s[:-3], sep) + sep + s[-3:]
 
+
+
 class command_wget(HoneyPotCommand):
+    """
+    """
     def start(self):
+        """
+        """
         try:
             optlist, args = getopt.getopt(self.args, 'cqO:P:')
         except getopt.GetoptError as err:
@@ -75,7 +96,7 @@ class command_wget(HoneyPotCommand):
         if '://' not in url:
             url = 'http://%s' % url
 
-        urldata = urlparse.urlparse(url)
+        urldata = urlparse(url)
 
         if outfile is None:
             outfile = urldata.path.split('/')[-1]
@@ -109,15 +130,18 @@ class command_wget(HoneyPotCommand):
             self.deferred.addCallback(self.success, outfile)
             self.deferred.addErrback(self.error, url)
 
+
     def download(self, url, fakeoutfile, outputfile, *args, **kwargs):
+        """
+        """
         try:
-            parsed = urlparse.urlparse(url)
+            parsed = urlparse(url)
             scheme = parsed.scheme
             host = parsed.hostname
             port = parsed.port or (443 if scheme == 'https' else 80)
             path = parsed.path or '/'
             if scheme != 'http' and scheme != 'https':
-                raise exceptions.NotImplementedError
+                raise NotImplementedError
         except:
             self.write('%s: Unsupported scheme.\n' % (url,))
             self.exit()
@@ -138,17 +162,21 @@ class command_wget(HoneyPotCommand):
             contextFactory = ssl.ClientContextFactory()
             contextFactory.method = SSL.SSLv23_METHOD
             reactor.connectSSL(host, port, factory, contextFactory)
-        else: #can only be http, since we raised an error above for unknown schemes
+        else: # Can only be http, since we raised an error above for unknown schemes
             self.connection = reactor.connectTCP(
                 host, port, factory, bindAddress=out_addr)
 
         return factory.deferred
 
+
     def handle_CTRL_C(self):
         self.write('^C\n')
         self.connection.transport.loseConnection()
 
+
     def success(self, data, outfile):
+        """
+        """
         if not os.path.isfile(self.safeoutfile):
             log.msg("there's no file " + self.safeoutfile)
             self.exit()
@@ -156,7 +184,7 @@ class command_wget(HoneyPotCommand):
         shasum = hashlib.sha256(open(self.safeoutfile, 'rb').read()).hexdigest()
         hash_path = '%s/%s' % (self.download_path, shasum)
 
-        # if we have content already, delete temp file
+        # If we have content already, delete temp file
         if not os.path.exists(hash_path):
             os.rename(self.safeoutfile, hash_path)
         else:
@@ -175,29 +203,35 @@ class command_wget(HoneyPotCommand):
                 outfile=hash_path,
                 shasum=shasum)
 
-        # link friendly name to hash
+        # Link friendly name to hash
         os.symlink( shasum, self.safeoutfile )
 
         # FIXME: is this necessary?
         self.safeoutfile = hash_path
 
-        # update the honeyfs to point to downloaded file
+        # Update the honeyfs to point to downloaded file
         f = self.fs.getfile(outfile)
         f[A_REALFILE] = hash_path
         self.exit()
 
-    def error(self, error, url):
+
+    def error(self, error,url):
+
         if hasattr(error, 'getErrorMessage'): # exceptions
-            error = error.getErrorMessage()
-        self.write(error+'\n')
-        # Real wget also adds this:
-        self.write('{} ERROR 404: Not Found.\n'.format(time.strftime('%Y-%m-%d %T')))
+            errorMessage = error.getErrorMessage()
+            self.write(errorMessage +'\n')
+            # Real wget also adds this:
+        if hasattr(error, 'webStatus') and hasattr(error,'webMessage'): # exceptions
+            dateWithError = '{} ERROR '.format(time.strftime('%Y-%m-%d %T'))
+            self.write(dateWithError + str(error.webStatus) + ': ' + error.webMessage + '\n')
+        else:
+            self.write('{} ERROR 404: Not Found.\n'.format(time.strftime('%Y-%m-%d %T')))
         self.exit()
 
 commands['/usr/bin/wget'] = command_wget
 commands['/usr/bin/dget'] = command_wget
 
-# from http://code.activestate.com/recipes/525493/
+# From http://code.activestate.com/recipes/525493/
 class HTTPProgressDownloader(client.HTTPDownloader):
     def __init__(self, wget, fakeoutfile, url, outfile, headers=None):
         client.HTTPDownloader.__init__(self, url, outfile, headers=headers,
@@ -211,13 +245,21 @@ class HTTPProgressDownloader(client.HTTPDownloader):
         self.nomore = False
         self.quiet = self.wget.quiet
 
-    def noPage(self, reason): # called for non-200 responses
+
+    def noPage(self, reason): # Called for non-200 responses
+        """
+        """
         if self.status == '304':
             client.HTTPDownloader.page(self, '')
         else:
+            reason.webStatus = self.status
+            reason.webMessage = self.message
             client.HTTPDownloader.noPage(self, reason)
 
+
     def gotHeaders(self, headers):
+        """
+        """
         if self.status == '200':
             if self.quiet == False:
                 self.wget.write('200 OK\n')
@@ -239,24 +281,25 @@ class HTTPProgressDownloader(client.HTTPDownloader):
                         self.contenttype))
             else:
                 if self.quiet == False:
-                    self.wget.write('Length: unspecified [%s]\n' % \
-                        (self.contenttype))
+                    self.wget.write('Length: unspecified [{}]\n'.format(self.contenttype))
             if self.wget.limit_size > 0 and \
                     self.totallength > self.wget.limit_size:
-                log.msg( 'Not saving URL (%s) due to file size limit' % \
-                    (self.wget.url,) )
+                log.msg( 'Not saving URL ({}) due to file size limit'.format(self.wget.url))
                 self.fileName = os.path.devnull
                 self.nomore = True
             if self.quiet == False:
-                self.wget.write('Saving to: `%s\'\n\n' % self.fakeoutfile)
+                self.wget.write('Saving to: `{}\'\n\n'.format(self.fakeoutfile))
 
         return client.HTTPDownloader.gotHeaders(self, headers)
 
+
     def pagePart(self, data):
+        """
+        """
         if self.status == '200':
             self.currentlength += len(data)
 
-            # if downloading files of unspecified size, this could happen:
+            # If downloading files of unspecified size, this could happen:
             if not self.nomore and self.wget.limit_size > 0 and \
                     self.currentlength > self.wget.limit_size:
                 log.msg( 'File limit reached, not saving any more data!' )
@@ -269,7 +312,7 @@ class HTTPProgressDownloader(client.HTTPDownloader):
                 return client.HTTPDownloader.pagePart(self, data)
             if self.totallength:
                 percent = (self.currentlength/self.totallength)*100
-                spercent = "%i%%" % percent
+                spercent = "{}%".format(percent)
             else:
                 spercent = '%dK' % (self.currentlength/1000)
                 percent = 0
@@ -287,7 +330,10 @@ class HTTPProgressDownloader(client.HTTPDownloader):
             self.lastupdate = time.time()
         return client.HTTPDownloader.pagePart(self, data)
 
+
     def pageEnd(self):
+        """
+        """
         if self.totallength != 0 and self.currentlength != self.totallength:
             return client.HTTPDownloader.pageEnd(self)
         if self.quiet == False:
@@ -309,5 +355,3 @@ class HTTPProgressDownloader(client.HTTPDownloader):
 
         self.wget.fileName = self.fileName
         return client.HTTPDownloader.pageEnd(self)
-
-# vim: set sw=4 et:

@@ -41,7 +41,7 @@ class HoneyPotCommand(object):
             self.safeoutfile = '%s/%s-%s-%s-redir_%s' % (
                 self.protocol.cfg.get('honeypot', 'download_path'),
                 time.strftime('%Y%m%d-%H%M%S'),
-                self.protocol.terminal.transport.session.conn.transport.transportId,
+                self.protocol.getProtoTransport().transportId,
                 self.protocol.terminal.transport.session.id,
                 re.sub('[^A-Za-z0-9]', '_', self.outfile))
             perm = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
@@ -158,7 +158,7 @@ class HoneyPotShell(object):
     def lineReceived(self, line):
         """
         """
-        log.msg('CMD: {}'.format(line))
+        log.msg(eventid='cowrie.command.input', input=line, format='CMD: %(input)s')
         self.lexer = shlex.shlex(instream=line, punctuation_chars=True)
         tokens = []
         while True:
@@ -333,33 +333,29 @@ class HoneyPotShell(object):
         """
         if not self.interactive:
             return
-        # Example: srv03:~#
-        #prompt = '%s:%%(path)s' % self.protocol.hostname
-        # Example: root@svr03:~#     (More of a "Debianu" feel)
-        prompt = '%s@%s:%%(path)s' % (self.protocol.user.username, self.protocol.hostname)
+
+        cwd = self.protocol.cwd
+        homelen = len(self.protocol.user.avatar.home)
+        if cwd == self.protocol.user.avatar.home:
+            cwd = '~'
+        elif len(cwd) > (homelen+1) and \
+                cwd[:(homelen+1)] == self.protocol.user.avatar.home + '/':
+            cwd = '~' + cwd[homelen:]
+        # Uncomment the three lines below for a 'better' CentOS look.
+        # Rather than '[root@svr03 /var/log]#' is shows '[root@svr03 log]#'.
+        #cwd = cwd.rsplit('/', 1)[-1]
+        #if not cwd:
+        #    cwd = '/'
+
         # Example: [root@svr03 ~]#   (More of a "CentOS" feel)
-        #prompt = '[%s@%s %%(path)s]' % (self.protocol.user.username, self.protocol.hostname,)
+        # Example: root@svr03:~#     (More of a "Debian" feel)
+        prompt = '{}@{}:{}'.format(self.protocol.user.username, self.protocol.hostname, cwd)
         if not self.protocol.user.uid:
             prompt += '# '    # "Root" user
         else:
             prompt += '$ '    # "Non-Root" user
-
-        path = self.protocol.cwd
-        homelen = len(self.protocol.user.avatar.home)
-        if path == self.protocol.user.avatar.home:
-            path = '~'
-        elif len(path) > (homelen+1) and \
-                path[:(homelen+1)] == self.protocol.user.avatar.home + '/':
-            path = '~' + path[homelen:]
-        # Uncomment the three lines below for a 'better' CentOS look.
-        # Rather than '[root@svr03 /var/log]#' is shows '[root@svr03 log]#'.
-        #path = path.rsplit('/', 1)[-1]
-        #if not path:
-        #    path = '/'
-
-        attrs = {'path': path}
-        self.protocol.terminal.write(prompt % attrs)
-        self.protocol.ps = (prompt % attrs , '> ')
+        self.protocol.terminal.write(prompt)
+        self.protocol.ps = (prompt , '> ')
 
 
     def eofReceived(self):
